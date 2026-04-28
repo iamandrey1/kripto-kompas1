@@ -15,22 +15,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm install
 
       - name: Build
-        run: pnpm build
+        run: npm run build
         env:
           VITE_ETHERSCAN_API_KEY: ${{ secrets.VITE_ETHERSCAN_API_KEY }}
           VITE_HELIUS_API_KEY: ${{ secrets.VITE_HELIUS_API_KEY }}
           VITE_GROQ_API_KEY: ${{ secrets.VITE_GROQ_API_KEY }}
 
       - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: team_bLNtMBFkrlQcrhK40Ipp5dWp
-          vercel-project-id: prj_ISaqUk98lfY7dsFYSmp5nMXWoevn
-          vercel-args: '--prod'
+        run: |
+          curl -X POST https://api.vercel.com/v1/deployments \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "project": "kripto-kompas1",
+              "target": "production",
+              "gitSource": {
+                "type": "github",
+                "repo": "iamandrey1/kripto-kompas1",
+                "ref": "main"
+              }
+            }'
