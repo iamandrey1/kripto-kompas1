@@ -174,11 +174,13 @@ const Starfield = () => {
 const ToolButton = ({
   icon,
   label,
-  items
+  items,
+  onItemClick
 }: {
   icon: React.ReactNode;
   label: string;
   items: string[];
+  onItemClick?: (item: string) => void;
 }) => {
   const [showMenu, setShowMenu] = useState(false);
 
@@ -201,6 +203,10 @@ const ToolButton = ({
           {items.map((item, i) => (
             <button
               key={i}
+              onClick={() => {
+                setShowMenu(false);
+                onItemClick?.(item);
+              }}
               className="w-full text-left px-4 py-2.5 text-sm text-white/60 hover:text-white hover:bg-white/5 rounded-lg transition-all cursor-pointer"
             >
               {item}
@@ -210,6 +216,23 @@ const ToolButton = ({
       )}
     </div>
   );
+};
+
+// Handle tool item click
+const handleToolItemClick = (toolId: string, item: string, setSearchQuery: (q: string) => void, setShowAlertModal: (v: boolean) => void, setShowPortfolioModal: (v: boolean) => void) => {
+  if (toolId === 'wallet') {
+    if (item === 'ETH кошельки' || item === 'Проверить адрес') {
+      setSearchQuery('0x');
+    }
+  }
+  if (toolId === 'alerts') {
+    if (item === 'Новые сделки') {
+      setShowAlertModal(true);
+    }
+  }
+  if (toolId === 'tokens') {
+    setShowPortfolioModal(true);
+  }
 };
 
 export default function HomePage() {
@@ -250,6 +273,73 @@ export default function HomePage() {
 
   // Watchlist state
   const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [watchlistCoins, setWatchlistCoins] = useState<Array<{id: string; name: string; symbol: string; price: number; change: number}>>([]);
+
+  // Check if token is in watchlist
+  const isInWatchlist = (tokenId: string) => watchlist.includes(tokenId);
+
+  // Toggle watchlist
+  const toggleWatchlist = async (tokenId: string, name: string, symbol: string, price: number, change: number) => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
+    if (isInWatchlist(tokenId)) {
+      // Remove from watchlist
+      await supabase.from('watchlists').delete().eq('user_id', user.id).eq('token_id', tokenId);
+      setWatchlist(prev => prev.filter(id => id !== tokenId));
+      setWatchlistCoins(prev => prev.filter(c => c.id !== tokenId));
+    } else {
+      // Add to watchlist
+      await supabase.from('watchlists').insert({ user_id: user.id, token_id: tokenId });
+      setWatchlist(prev => [...prev, tokenId]);
+      setWatchlistCoins(prev => [...prev, { id: tokenId, name, symbol, price, change }]);
+    }
+  };
+
+  // Portfolio functions
+  const addToPortfolio = async () => {
+    if (!newPortfolioItem.symbol.trim() || !newPortfolioItem.amount.trim()) return;
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
+    const newItem = {
+      id: Date.now().toString(),
+      symbol: newPortfolioItem.symbol.toUpperCase(),
+      amount: parseFloat(newPortfolioItem.amount),
+      buyPrice: parseFloat(newPortfolioItem.buyPrice) || 0,
+      name: newPortfolioItem.symbol.toUpperCase()
+    };
+
+    await supabase.from('portfolios').insert({
+      user_id: user.id,
+      token_id: newPortfolioItem.symbol.toLowerCase(),
+      name: newPortfolioItem.symbol.toUpperCase(),
+      symbol: newPortfolioItem.symbol.toUpperCase(),
+      amount: parseFloat(newPortfolioItem.amount),
+      buy_price: parseFloat(newPortfolioItem.buyPrice) || 0
+    });
+
+    setPortfolio([...portfolio, newItem]);
+    setNewPortfolioItem({ symbol: '', amount: '', buyPrice: '' });
+    setShowPortfolioModal(false);
+  };
+
+  const removeFromPortfolio = async (itemId: string) => {
+    if (!user) return;
+    await supabase.from('portfolios').delete().eq('user_id', user.id).eq('token_id', itemId);
+    setPortfolio(prev => prev.filter(p => p.id !== itemId));
+  };
+
+  // Delete price alert
+  const deletePriceAlert = async (alertId: string) => {
+    if (!user) return;
+    await supabase.from('price_alerts').delete().eq('user_id', user.id).eq('id', alertId);
+    setPriceAlerts(prev => prev.filter(a => a.id !== alertId));
+  };
 
   // Auth effects
   useEffect(() => {
@@ -514,9 +604,9 @@ export default function HomePage() {
   const tools = [
     { id: "wallet", icon: <Wallet className="w-4 h-4" />, label: "Кошельки", items: ["ETH кошельки", "SOL кошельки", "BTC кошельки", "Проверить адрес"] },
     { id: "smart", icon: <Users className="w-4 h-4" />, label: "Smart Money", items: ["Фонды", "Киты", "Инсайдеры", "Топ сигналы"] },
-    { id: "tokens", icon: <Map className="w-4 h-4" />, label: "Токены", items: ["Распределение", "Холдеры", "Риск анализ", "Топ токены"] },
+    { id: "tokens", icon: <Map className="w-4 h-4" />, label: "Портфель", items: ["Мой портфель", "Добавить актив", "Распределение"] },
     { id: "vesting", icon: <Clock className="w-4 h-4" />, label: "Разлоки", items: ["Календарь", "Предстоящие", "История"] },
-    { id: "alerts", icon: <Eye className="w-4 h-4" />, label: "Алерты", items: ["Новые сделки", "Разлоки", "Новости"] },
+    { id: "alerts", icon: <Eye className="w-4 h-4" />, label: "Алерты", items: ["Мои алерты", "Новые сделки", "Новости"] },
     { id: "ai", icon: <Brain className="w-4 h-4" />, label: "AI Анализ", items: ["Чат", "Прогнозы", "Рекомендации"] },
   ];
 
@@ -761,7 +851,7 @@ export default function HomePage() {
             {/* Tools - Desktop */}
             <div className="hidden xl:flex items-center gap-1">
               {tools.map((tool) => (
-                <ToolButton key={tool.id} icon={tool.icon} label={tool.label} items={tool.items} />
+                <ToolButton key={tool.id} icon={tool.icon} label={tool.label} items={tool.items} onItemClick={(item) => handleToolItemClick(tool.id, item, setSearchQuery, setShowAlertModal, setShowPortfolioModal)} />
               ))}
             </div>
 
@@ -952,12 +1042,23 @@ export default function HomePage() {
           <div className="mt-6 sm:mt-8 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
             {topTokens.slice(0, 8).map((token) => {
               const price = tokenPrices[token.id];
+              const inWatchlist = isInWatchlist(token.id);
               return (
                 <div
                   key={token.id}
                   onClick={() => fetchTokenDetail(token.id, token.name, token.symbol)}
-                  className="p-3 sm:p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:border-emerald-500/20 transition-all cursor-pointer"
+                  className="p-3 sm:p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:border-emerald-500/20 transition-all cursor-pointer relative group"
                 >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleWatchlist(token.id, token.name, token.symbol, price?.price || 0, price?.change || 0);
+                    }}
+                    className={`absolute top-2 right-2 p-1 rounded-lg transition-all cursor-pointer ${inWatchlist ? 'text-yellow-400' : 'text-white/20 opacity-0 group-hover:opacity-100 hover:text-yellow-400'}`}
+                    title={inWatchlist ? 'Убрать из избранного' : 'Добавить в избранное'}
+                  >
+                    <Star className={`w-3 h-3 ${inWatchlist ? 'fill-yellow-400' : ''}`} />
+                  </button>
                   <div className="flex items-center justify-between mb-1 sm:mb-2">
                     <span className="text-xs sm:text-sm font-medium">{token.symbol}</span>
                     {price && price.change !== undefined && (
@@ -1057,6 +1158,13 @@ export default function HomePage() {
                       🔔 Поставить алерт на эту цену
                     </button>
 
+                    <button
+                      onClick={() => toggleWatchlist(selectedToken.id, selectedToken.name, selectedToken.symbol, tokenDetail.price || 0, tokenDetail.change24h || 0)}
+                      className="w-full mt-2 py-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 font-medium hover:bg-yellow-500/20 transition-all cursor-pointer"
+                    >
+                      {isInWatchlist(selectedToken.id) ? '⭐ Убрать из избранного' : '⭐ Добавить в избранное'}
+                    </button>
+
                     {tokenDetail.description && (
                       <p className="text-sm text-white/60 mt-4">{tokenDetail.description}...</p>
                     )}
@@ -1101,9 +1209,106 @@ export default function HomePage() {
                         {alert.condition === 'above' ? '↑ выше' : '↓ ниже'}
                       </span>
                     </div>
-                    <span className="text-sm font-medium">${alert.targetPrice.toLocaleString()}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium">${alert.targetPrice.toLocaleString()}</span>
+                      <button
+                        onClick={() => deletePriceAlert(alert.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/30 hover:text-red-400 transition-all cursor-pointer"
+                        title="Удалить"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Watchlist Section */}
+          {watchlistCoins.length > 0 && (
+            <div className="mt-8">
+              <div className="flex items-center gap-2 mb-4">
+                <Star className="w-4 h-4 text-yellow-400" />
+                <span className="text-sm text-yellow-400 font-medium">⭐ Избранное</span>
+              </div>
+              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                {watchlistCoins.map((coin) => (
+                  <div
+                    key={coin.id}
+                    onClick={() => fetchTokenDetail(coin.id, coin.name, coin.symbol)}
+                    className="flex items-center gap-3 px-4 py-2 rounded-xl bg-white/[0.02] border border-white/5 whitespace-nowrap hover:border-yellow-500/20 transition-all cursor-pointer"
+                  >
+                    <span className="text-sm font-medium">{coin.symbol}</span>
+                    <span className={`text-xs ${coin.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {coin.change >= 0 ? '+' : ''}{coin.change.toFixed(1)}%
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleWatchlist(coin.id, coin.name, coin.symbol, coin.price, coin.change);
+                      }}
+                      className="p-1 rounded hover:bg-red-500/10 text-yellow-400 cursor-pointer"
+                      title="Убрать из избранного"
+                    >
+                      <Star className="w-3 h-3 fill-yellow-400" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Portfolio Section */}
+          {portfolio.length > 0 && (
+            <div className="mt-8">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-emerald-400" />
+                  <span className="text-sm text-emerald-400 font-medium">💼 Мой портфель</span>
+                </div>
+                <button
+                  onClick={() => setShowPortfolioModal(true)}
+                  className="px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs hover:bg-emerald-500/20 transition-all cursor-pointer"
+                >
+                  + Добавить
+                </button>
+              </div>
+              <div className="space-y-2">
+                {portfolio.map((item) => {
+                  const currentPrice = tokenPrices[item.symbol.toLowerCase()]?.price || 0;
+                  const profitLoss = item.buyPrice > 0 ? ((currentPrice - item.buyPrice) / item.buyPrice * 100) : 0;
+                  return (
+                    <div key={item.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 text-xs font-bold">
+                          {item.symbol.slice(0, 2)}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">{item.symbol}</p>
+                          <p className="text-xs text-white/40">{item.amount} шт</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className="text-sm font-medium">${(currentPrice * item.amount).toFixed(2)}</p>
+                          {item.buyPrice > 0 && (
+                            <p className={`text-xs ${profitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {profitLoss >= 0 ? '+' : ''}{profitLoss.toFixed(1)}%
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => removeFromPortfolio(item.id)}
+                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/30 hover:text-red-400 transition-all cursor-pointer"
+                          title="Удалить"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1159,6 +1364,56 @@ export default function HomePage() {
                     className="w-full py-3 rounded-xl bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 transition-all cursor-pointer"
                   >
                     Создать алерт
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Portfolio Modal */}
+          {showPortfolioModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowPortfolioModal(false)}>
+              <div className="w-full max-w-sm p-6 rounded-2xl bg-[#0a0a0f] border border-white/10" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-bold">💼 Добавить в портфель</h3>
+                  <button onClick={() => setShowPortfolioModal(false)} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/50 hover:text-white cursor-pointer">✕</button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-white/40 mb-1 block">Токен (символ)</label>
+                    <input
+                      type="text"
+                      value={newPortfolioItem.symbol}
+                      onChange={(e) => setNewPortfolioItem(prev => ({ ...prev, symbol: e.target.value }))}
+                      placeholder="BTC, ETH, SOL..."
+                      className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-emerald-400/50 outline-none text-sm placeholder-white/30"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/40 mb-1 block">Количество</label>
+                    <input
+                      type="number"
+                      value={newPortfolioItem.amount}
+                      onChange={(e) => setNewPortfolioItem(prev => ({ ...prev, amount: e.target.value }))}
+                      placeholder="0.5"
+                      className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-emerald-400/50 outline-none text-sm placeholder-white/30"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/40 mb-1 block">Цена покупки ($) - опционально</label>
+                    <input
+                      type="number"
+                      value={newPortfolioItem.buyPrice}
+                      onChange={(e) => setNewPortfolioItem(prev => ({ ...prev, buyPrice: e.target.value }))}
+                      placeholder="50000"
+                      className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-emerald-400/50 outline-none text-sm placeholder-white/30"
+                    />
+                  </div>
+                  <button
+                    onClick={addToPortfolio}
+                    className="w-full py-3 rounded-xl bg-emerald-500 text-black text-sm font-semibold hover:bg-emerald-400 transition-all cursor-pointer"
+                  >
+                    Добавить
                   </button>
                 </div>
               </div>
