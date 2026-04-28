@@ -25,8 +25,12 @@ import {
   BarChart3,
   LogOut,
   User,
+  ExternalLink,
+  Copy,
+  Loader2,
 } from "lucide-react";
 import { supabase, PortfolioItem, WatchlistItem, PriceAlert } from "../lib/supabase";
+import { fetchEthWalletData, fetchSolWalletData, askGroqAI, EthWalletData, SolWalletData } from "../lib/api-helpers";
 import type { User as SupabaseUser, Session } from '@supabase/supabase-js';
 
 // Starfield with constellation - stars react to mouse
@@ -247,10 +251,17 @@ const handleToolItemClick = (toolId: string, item: string, setSearchQuery: (q: s
 export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [chatMessage, setChatMessage] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [messages, setMessages] = useState([
     { role: "ai", text: "Привет! Я AI-консультант. Спроси меня о любом кошельке или токене." }
   ]);
+
+  // Wallet data states
+  const [ethWalletData, setEthWalletData] = useState<EthWalletData | null>(null);
+  const [solWalletData, setSolWalletData] = useState<SolWalletData | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletType, setWalletType] = useState<'eth' | 'sol'>('eth');
 
   // Auth state
   const [user, setUser] = useState<SupabaseUser | null>(null);
@@ -633,27 +644,29 @@ export default function HomePage() {
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setIsLoading(true);
+    setWalletLoading(true);
 
     const query = searchQuery.trim();
 
     // Check if it's an ETH wallet address (starts with 0x, 42 chars)
     if (query.startsWith('0x') && query.length === 42) {
-      // Use a free public Etherscan API endpoint (limited but works)
-      try {
-        // Note: For production, get free API key from etherscan.io
-        const response = await fetch(
-          `https://api.etherscan.io/api?module=account&action=balance&address=${query}&tag=latest&apikey=HBENQ6H6K4N4T2PMT8V4I5VRU9ZJ6JX6PH`
-        );
-        const data = await response.json();
-        if (data.status === '1') {
-          const balance = parseInt(data.result) / 1e18;
-          setWalletBalance({ eth: balance.toFixed(4), balance });
-          setSearchResult({type: 'wallet', data: {address: query, balance: balance.toFixed(4)}});
-        }
-      } catch (error) {
-        console.log('Wallet search error:', error);
-        // Fallback - show address anyway
-        setSearchResult({type: 'wallet', data: {address: query, balance: 'API недоступен'}});
+      setWalletType('eth');
+      const walletData = await fetchEthWalletData(query);
+      if (walletData) {
+        setEthWalletData(walletData);
+        setSearchResult({type: 'wallet', data: walletData});
+      } else {
+        setSearchResult({type: 'wallet', data: {address: query, balance: 'Ошибка загрузки'}});
+      }
+    } else if (query.length > 30 && !query.startsWith('0x')) {
+      // Likely Solana address
+      setWalletType('sol');
+      const walletData = await fetchSolWalletData(query);
+      if (walletData) {
+        setSolWalletData(walletData);
+        setSearchResult({type: 'wallet', data: walletData});
+      } else {
+        setSearchResult({type: 'wallet', data: {address: query, balance: 'Ошибка загрузки'}});
       }
     } else {
       // Search as token
@@ -680,6 +693,26 @@ export default function HomePage() {
     }
 
     setIsLoading(false);
+    setWalletLoading(false);
+  };
+
+  // Handle AI chat message
+  const handleSendMessage = async () => {
+    if (!chatMessage.trim()) return;
+
+    const userMsg = chatMessage;
+    setMessages(prev => [...prev, { role: "user", text: userMsg }]);
+    setChatMessage("");
+    setAiLoading(true);
+
+    try {
+      const aiResponse = await askGroqAI(userMsg);
+      setMessages(prev => [...prev, { role: "ai", text: aiResponse }]);
+    } catch (error) {
+      setMessages(prev => [...prev, { role: "ai", text: "Произошла ошибка. Попробуйте ещё раз." }]);
+    }
+
+    setAiLoading(false);
   };
 
   const tools = [
@@ -847,14 +880,6 @@ export default function HomePage() {
       return "Рекомендую диверсификацию портфеля. Не инвестируй более 5% в один актив.";
     }
     return aiResponses[Math.floor(Math.random() * aiResponses.length)];
-  };
-
-  const handleSendMessage = () => {
-    if (!chatMessage.trim()) return;
-    const userMsg = chatMessage;
-    const aiResponse = getAIResponse(userMsg);
-    setMessages([...messages, { role: "user", text: userMsg }, { role: "ai", text: aiResponse }]);
-    setChatMessage("");
   };
 
   // Add price alert
@@ -1102,10 +1127,78 @@ export default function HomePage() {
           {searchResult.type && (
             <div className="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
               {searchResult.type === 'wallet' && (
-                <div className="text-center">
-                  <p className="text-xs text-white/40 mb-1">Баланс кошелька</p>
-                  <p className="text-3xl font-bold text-emerald-400">{searchResult.data.balance} ETH</p>
-                  <p className="text-xs text-white/30 mt-1 truncate">{searchResult.data.address}</p>
+                <div>
+                  {walletLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+                      <span className="ml-2 text-white/60">Загрузка данных...</span>
+                    </div>
+                  ) : ethWalletData ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <p className="text-xs text-white/40">Баланс ETH</p>
+                          <p className="text-2xl font-bold text-emerald-400">{ethWalletData.balance} ETH</p>
+                          <p className="text-sm text-white/60">${ethWalletData.balanceUsd.toFixed(2)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-white/40">Цена ETH</p>
+                          <p className="text-lg font-bold">${ethWalletData.ethPrice.toLocaleString()}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <a
+                          href={`https://etherscan.io/address/${ethWalletData.address}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 py-2 rounded-lg bg-white/5 text-sm text-center hover:bg-white/10 transition-all flex items-center justify-center gap-1"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                          Etherscan
+                        </a>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(ethWalletData.address)}
+                          className="py-2 px-4 rounded-lg bg-white/5 hover:bg-white/10 transition-all"
+                          title="Копировать адрес"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {ethWalletData.transactions.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs text-white/40 mb-2">Последние транзакции</p>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {ethWalletData.transactions.slice(0, 5).map((tx, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs p-2 rounded bg-white/5">
+                                <span className="text-white/60 truncate max-w-[100px]">{tx.from.slice(0, 6)}...</span>
+                                <span className="text-white/40">→</span>
+                                <span className="text-white/60 truncate max-w-[100px]">{tx.to.slice(0, 6)}...</span>
+                                <span className="text-emerald-400">{tx.value} ETH</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : solWalletData ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <p className="text-xs text-white/40">Баланс SOL</p>
+                          <p className="text-2xl font-bold text-emerald-400">{solWalletData.balance.toFixed(4)} SOL</p>
+                          <p className="text-sm text-white/60">${solWalletData.balanceUsd.toFixed(2)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-white/40">Цена SOL</p>
+                          <p className="text-lg font-bold">${solWalletData.solPrice.toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <p className="text-sm text-white/60">Данные недоступны</p>
+                    </div>
+                  )}
                 </div>
               )}
               {searchResult.type === 'token' && (
