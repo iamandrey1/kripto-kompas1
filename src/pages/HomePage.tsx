@@ -13,6 +13,8 @@ import {
   Shield,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowUpDown,
+  ArrowDownUp,
   TrendingUp,
   Menu,
   X,
@@ -219,7 +221,7 @@ const ToolButton = ({
 };
 
 // Handle tool item click
-const handleToolItemClick = (toolId: string, item: string, setSearchQuery: (q: string) => void, setShowAlertModal: (v: boolean) => void, setShowPortfolioModal: (v: boolean) => void) => {
+const handleToolItemClick = (toolId: string, item: string, setSearchQuery: (q: string) => void, setShowAlertModal: (v: boolean) => void, setShowPortfolioModal: (v: boolean) => void, setShowSwapModal: (v: boolean) => void) => {
   if (toolId === 'wallet') {
     if (item === 'ETH кошельки' || item === 'Проверить адрес') {
       setSearchQuery('0x');
@@ -231,7 +233,14 @@ const handleToolItemClick = (toolId: string, item: string, setSearchQuery: (q: s
     }
   }
   if (toolId === 'tokens') {
-    setShowPortfolioModal(true);
+    if (item === 'Мой портфель' || item === 'Добавить актив') {
+      setShowPortfolioModal(true);
+    }
+  }
+  if (toolId === 'swap') {
+    if (item === 'Обменять токены') {
+      setShowSwapModal(true);
+    }
   }
 };
 
@@ -274,6 +283,78 @@ export default function HomePage() {
   // Watchlist state
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [watchlistCoins, setWatchlistCoins] = useState<Array<{id: string; name: string; symbol: string; price: number; change: number}>>([]);
+
+  // Swap state
+  const [showSwapModal, setShowSwapModal] = useState(false);
+  const [swapFromToken, setSwapFromToken] = useState<{id: string; symbol: string; name: string; price: number} | null>(null);
+  const [swapToToken, setSwapToToken] = useState<{id: string; symbol: string; name: string; price: number} | null>(null);
+  const [swapFromAmount, setSwapFromAmount] = useState('');
+  const [swapToAmount, setSwapToAmount] = useState('');
+  const [swapLoading, setSwapLoading] = useState(false);
+  const [swapSuccess, setSwapSuccess] = useState(false);
+
+  // Available tokens for swap
+  const swapTokens = [
+    { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', price: tokenPrices['ethereum']?.price || 0 },
+    { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', price: tokenPrices['bitcoin']?.price || 0 },
+    { id: 'solana', symbol: 'SOL', name: 'Solana', price: tokenPrices['solana']?.price || 0 },
+    { id: 'binancecoin', symbol: 'BNB', name: 'BNB', price: tokenPrices['binancecoin']?.price || 0 },
+    { id: 'uniswap', symbol: 'UNI', name: 'Uniswap', price: tokenPrices['uniswap']?.price || 0 },
+    { id: 'chainlink', symbol: 'LINK', name: 'Chainlink', price: tokenPrices['chainlink']?.price || 0 },
+    { id: 'avalanche-2', symbol: 'AVAX', name: 'Avalanche', price: tokenPrices['avalanche-2']?.price || 0 },
+  ];
+
+  // Calculate swap output
+  const calculateSwap = () => {
+    if (swapFromToken && swapToToken && swapFromAmount && parseFloat(swapFromAmount) > 0) {
+      const fromValue = parseFloat(swapFromAmount) * swapFromToken.price;
+      const toAmount = fromValue / swapToToken.price;
+      setSwapToAmount(toAmount.toFixed(6));
+    } else {
+      setSwapToAmount('');
+    }
+  };
+
+  // Handle swap
+  const executeSwap = async () => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    if (!swapFromToken || !swapToToken || !swapFromAmount) return;
+
+    setSwapLoading(true);
+
+    // Simulate swap (in production, integrate with 1inch or similar DEX API)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Save to portfolio as new position
+    const swapValue = parseFloat(swapFromAmount) * swapFromToken.price;
+    const receivedAmount = swapValue / swapToToken.price;
+
+    await supabase.from('portfolios').insert({
+      user_id: user.id,
+      token_id: swapToToken.id,
+      name: swapToToken.symbol,
+      symbol: swapToToken.symbol,
+      amount: receivedAmount,
+      buy_price: swapToToken.price
+    });
+
+    // Reload portfolio
+    loadUserData(user.id);
+
+    setSwapLoading(false);
+    setSwapSuccess(true);
+    setTimeout(() => {
+      setShowSwapModal(false);
+      setSwapSuccess(false);
+      setSwapFromAmount('');
+      setSwapToAmount('');
+      setSwapFromToken(null);
+      setSwapToToken(null);
+    }, 2000);
+  };
 
   // Check if token is in watchlist
   const isInWatchlist = (tokenId: string) => watchlist.includes(tokenId);
@@ -604,6 +685,7 @@ export default function HomePage() {
   const tools = [
     { id: "wallet", icon: <Wallet className="w-4 h-4" />, label: "Кошельки", items: ["ETH кошельки", "SOL кошельки", "BTC кошельки", "Проверить адрес"] },
     { id: "smart", icon: <Users className="w-4 h-4" />, label: "Smart Money", items: ["Фонды", "Киты", "Инсайдеры", "Топ сигналы"] },
+    { id: "swap", icon: <ArrowUpDown className="w-4 h-4" />, label: "Swap", items: ["Обменять токены", "История обменов"] },
     { id: "tokens", icon: <Map className="w-4 h-4" />, label: "Портфель", items: ["Мой портфель", "Добавить актив", "Распределение"] },
     { id: "vesting", icon: <Clock className="w-4 h-4" />, label: "Разлоки", items: ["Календарь", "Предстоящие", "История"] },
     { id: "alerts", icon: <Eye className="w-4 h-4" />, label: "Алерты", items: ["Мои алерты", "Новые сделки", "Новости"] },
@@ -851,7 +933,7 @@ export default function HomePage() {
             {/* Tools - Desktop */}
             <div className="hidden xl:flex items-center gap-1">
               {tools.map((tool) => (
-                <ToolButton key={tool.id} icon={tool.icon} label={tool.label} items={tool.items} onItemClick={(item) => handleToolItemClick(tool.id, item, setSearchQuery, setShowAlertModal, setShowPortfolioModal)} />
+                <ToolButton key={tool.id} icon={tool.icon} label={tool.label} items={tool.items} onItemClick={(item) => handleToolItemClick(tool.id, item, setSearchQuery, setShowAlertModal, setShowPortfolioModal, setShowSwapModal)} />
               ))}
             </div>
 
@@ -1260,13 +1342,20 @@ export default function HomePage() {
           )}
 
           {/* Portfolio Section */}
-          {portfolio.length > 0 && (
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Wallet className="w-4 h-4 text-emerald-400" />
-                  <span className="text-sm text-emerald-400 font-medium">💼 Мой портфель</span>
-                </div>
+          <div className="mt-8">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm text-emerald-400 font-medium">💼 Портфель</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowSwapModal(true)}
+                  className="px-3 py-1 rounded-lg bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 text-purple-400 text-xs hover:from-purple-500/30 hover:to-pink-500/30 transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <ArrowUpDown className="w-3 h-3" />
+                  Swap
+                </button>
                 <button
                   onClick={() => setShowPortfolioModal(true)}
                   className="px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs hover:bg-emerald-500/20 transition-all cursor-pointer"
@@ -1274,6 +1363,14 @@ export default function HomePage() {
                   + Добавить
                 </button>
               </div>
+            </div>
+            {portfolio.length === 0 ? (
+              <div className="text-center py-8 px-4 rounded-xl bg-white/[0.02] border border-white/5">
+                <Wallet className="w-12 h-12 mx-auto mb-3 text-white/20" />
+                <p className="text-white/40 mb-2">Ваш портфель пуст</p>
+                <p className="text-white/20 text-sm">Добавьте активы или используйте Swap для обмена</p>
+              </div>
+            ) : (
               <div className="space-y-2">
                 {portfolio.map((item) => {
                   const currentPrice = tokenPrices[item.symbol.toLowerCase()]?.price || 0;
@@ -1309,6 +1406,165 @@ export default function HomePage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          {/* Swap Modal */}
+          {showSwapModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => !swapLoading && setShowSwapModal(false)}>
+              <div className="w-full max-w-md p-6 rounded-2xl bg-[#0a0a0f] border border-white/10" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <ArrowUpDown className="w-5 h-5 text-purple-400" />
+                    Swap токенов
+                  </h3>
+                  {!swapLoading && (
+                    <button onClick={() => setShowSwapModal(false)} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/50 hover:text-white cursor-pointer">✕</button>
+                  )}
+                </div>
+
+                {swapSuccess ? (
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                      <span className="text-4xl">✅</span>
+                    </div>
+                    <p className="text-xl font-bold text-emerald-400 mb-2">Обмен выполнен!</p>
+                    <p className="text-white/60">Токены добавлены в ваш портфель</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* From Token */}
+                    <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs text-white/40">Отдаёте</span>
+                        {!swapFromToken && (
+                          <span className="text-xs text-purple-400">Выберите токен</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          value={swapFromAmount}
+                          onChange={(e) => {
+                            setSwapFromAmount(e.target.value);
+                            setTimeout(calculateSwap, 100);
+                          }}
+                          onBlur={calculateSwap}
+                          placeholder="0.0"
+                          className="flex-1 bg-transparent text-2xl font-bold outline-none placeholder-white/20"
+                        />
+                        <select
+                          value={swapFromToken?.symbol || ''}
+                          onChange={(e) => {
+                            const token = swapTokens.find(t => t.symbol === e.target.value);
+                            setSwapFromToken(token || null);
+                            setTimeout(calculateSwap, 100);
+                          }}
+                          className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm cursor-pointer outline-none"
+                        >
+                          <option value="">Выбрать</option>
+                          {swapTokens.map(t => (
+                            <option key={t.id} value={t.symbol}>{t.symbol}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {swapFromToken && (
+                        <p className="text-xs text-white/30 mt-2">
+                          ${swapFromToken.price.toLocaleString()} за {swapFromToken.symbol}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Swap Arrow */}
+                    <div className="flex justify-center">
+                      <button
+                        onClick={() => {
+                          const temp = swapFromToken;
+                          setSwapFromToken(swapToToken);
+                          setSwapToToken(temp);
+                          setSwapFromAmount(swapToAmount);
+                          setSwapToAmount(swapFromAmount);
+                        }}
+                        className="p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all cursor-pointer"
+                      >
+                        <ArrowDownUp className="w-5 h-5 text-white/50" />
+                      </button>
+                    </div>
+
+                    {/* To Token */}
+                    <div className="p-4 rounded-xl bg-white/[0.03] border border-purple-500/20">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs text-white/40">Получаете</span>
+                        {!swapToToken && (
+                          <span className="text-xs text-purple-400">Выберите токен</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 text-2xl font-bold text-white/50">
+                          {swapToAmount || '0.0'}
+                        </div>
+                        <select
+                          value={swapToToken?.symbol || ''}
+                          onChange={(e) => {
+                            const token = swapTokens.find(t => t.symbol === e.target.value);
+                            setSwapToToken(token || null);
+                            setTimeout(calculateSwap, 100);
+                          }}
+                          className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm cursor-pointer outline-none"
+                        >
+                          <option value="">Выбрать</option>
+                          {swapTokens.map(t => (
+                            <option key={t.id} value={t.symbol}>{t.symbol}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {swapToToken && (
+                        <p className="text-xs text-white/30 mt-2">
+                          ~${swapToToken.price.toLocaleString()} за {swapToToken.symbol}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Swap Info */}
+                    {swapFromToken && swapToToken && swapFromAmount && (
+                      <div className="p-3 rounded-lg bg-white/5 text-xs text-white/40 space-y-1">
+                        <div className="flex justify-between">
+                          <span>Курс</span>
+                          <span>1 {swapFromToken.symbol} = {(swapFromToken.price / swapToToken.price).toFixed(6)} {swapToToken.symbol}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Комиссия сети</span>
+                          <span>~0.5%</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Swap Button */}
+                    <button
+                      onClick={executeSwap}
+                      disabled={!swapFromToken || !swapToToken || !swapFromAmount || swapLoading}
+                      className="w-full py-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold hover:from-purple-400 hover:to-pink-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {swapLoading ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="animate-spin">⏳</span>
+                          Выполняем обмен...
+                        </span>
+                      ) : !user ? (
+                        'Войдите для обмена'
+                      ) : (
+                        'Swap'
+                      )}
+                    </button>
+
+                    {!user && (
+                      <p className="text-xs text-center text-white/40">
+                        Войдите в аккаунт или зарегистрируйтесь для обмена токенов
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
